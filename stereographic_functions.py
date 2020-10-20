@@ -33,6 +33,7 @@ def plane_vector(hkl, latt_a, latt_b, latt_c, r= 1):
     h,k,l = hkl
     x, y, z, u, v, w = [], [], [], [], [], []
     mid_point = (latt_a + latt_b + latt_c)/2
+    #shifting the origin allows us to get the correct points for negative indices
     shifted_origin = np.sign(h)*(latt_a*-0.5*(np.sign(h)-1)) + np.sign(k)*(latt_b*-0.5*(np.sign(k)-1)) + np.sign(l)*(latt_c*-0.5*(np.sign(l)-1)) 
     if h != 0:
         h_point = latt_a/ h - shifted_origin
@@ -47,16 +48,14 @@ def plane_vector(hkl, latt_a, latt_b, latt_c, r= 1):
                 point = h_point
             else:
                 hk = h_point - k_point
-                hmid = h_point - mid_point
-                normal = np.cross(hk, hmid)
+                normal = np.cross(hk, latt_c) *np.sign(h)*np.sign(k)
                 normal = 1/np.linalg.norm(normal) * normal
                 point = h_point
         else:
             if l != 0:
                 l_point = latt_c/ l - shifted_origin
                 hl = h_point - l_point
-                hmid = h_point - mid_point
-                normal = np.cross(hmid, hl)
+                normal = np.cross(latt_b, hl) *np.sign(h)*np.sign(l)
                 normal = 1/np.linalg.norm(normal) * normal
                 point = h_point
             else:
@@ -69,8 +68,7 @@ def plane_vector(hkl, latt_a, latt_b, latt_c, r= 1):
             if l != 0:
                 l_point = latt_c/ l - shifted_origin
                 kl = k_point - l_point
-                kmid = k_point - mid_point
-                normal = np.cross(kl, kmid)
+                normal = np.cross(kl, latt_a)*np.sign(l)*np.sign(k)
                 normal = 1/np.linalg.norm(normal) * normal
                 point = k_point
             else:
@@ -185,6 +183,50 @@ def plane_sphere_intercept(hkl, latt_a, latt_b, latt_c):
 
     return xx,yy,zz
 
+def shortest_path(p1, p2, hemisphere_correct = False):
+    import numpy as np
+    #first def the plane they lie in
+    
+    if hemisphere_correct == True:
+        if p1[2]*p2[2] != 0:
+            p2 *= -1
+    
+    normal = np.cross(p1, p2)
+    if np.linalg.norm(normal) == 0:
+        normal = p1
+    normal = 1/np.linalg.norm(normal)* normal
+    
+    mp = (p1 + p2)/2
+    d = np.linalg.norm(p1 - mp)
+    
+    r = 1
+
+    phi = np.linspace(0, 2 * np.pi, 100)
+    i = r *np.cos(phi)
+    j = r* np.sin(phi)
+    m = np.zeros(np.size(phi))
+    xx, yy, zz = [],[],[]
+   
+
+    rot_axis = np.array((0.5*normal[0], 0.5*normal[1], 0.5*normal[2]+0.5))
+    if np.linalg.norm(rot_axis) == 0:
+        rot_axis = np.array((0,0,1))
+    normalise = 1/np.linalg.norm(rot_axis)
+    rot_axis = normalise*rot_axis
+    u,v,w = rot_axis[0], rot_axis[1], rot_axis[2]
+    for each in range(len(i)):
+        x,y,z = i[each], j[each], m[each]
+        nx, ny, nz = (2*u*(u*x + v*y + w*z)-x), (2*v*(u*x + v*y + w*z)- y),(2*w*(u*x + v*y + w*z)- z)
+        npoint = np.array((nx, ny, nz))
+        trial_d = np.linalg.norm(npoint - mp)
+        if trial_d < d:
+            xx.append(nx), yy.append(ny), zz.append(nz)
+               
+        
+        
+
+    return xx,yy,zz
+
 def equatorial_trace_projection(points):
     import numpy as np
     xu, yu = [],[]
@@ -274,7 +316,7 @@ def single_vector_display(lattice_vectors, hkl, factor=1e-6):
     plt.show()
 
     
-def display_stereograph(lattice_vectors, hs, ks, ls, factor = 1e-6, omit = [], show_label = True, show_trace = True, four_index_notation = False):
+def display_stereograph(lattice_vectors, hs, ks, ls, factor = 1e-6, omit = [], show_label = True, show_trace = True, four_index_notation = False, max_index = False):
     import matplotlib.pyplot as plt
     import numpy as np
     from mpl_toolkits.mplot3d import Axes3D
@@ -296,6 +338,9 @@ def display_stereograph(lattice_vectors, hs, ks, ls, factor = 1e-6, omit = [], s
                     continue
                 else:
                     omit_point = False
+                    if max_index != False:
+                        if np.abs((h + k)) > max_index:
+                            omit_point = True
                     for each in omit:
                         if h == each[0]:
                             if k == each[1]:
@@ -364,5 +409,179 @@ def show_hkl(lattice_vectors, hkl,scale):
     ax.set_yticks([])
     ax.set_zticks([])
     
+def within_bound_region(lattice_vectors, region_bounds, point, show = False):
+    ####plot###
+    latt_a, latt_b, latt_c = lattice_vectors
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from mpl_toolkits.mplot3d import Axes3D
+    if show == True:
+        fig = plt.figure(constrained_layout=False)
+        gs = fig.add_gridspec(nrows=2, ncols=3,wspace=0.7)
+        ax = fig.add_subplot(gs[:, :-1], projection='3d')
+    
+    ####end####
+    upper_bounding_points = []
+    lower_bounding_points = []
+    for hkl in region_bounds:
+        x, y, z, u,v,w  = plane_vector(hkl, latt_a,latt_b,latt_c)
+        u_normal = np.array((u[0], v[0], np.abs(w[0])))
+        l_normal = np.array((u[0], v[0], -np.abs(w[0])))
+        upper_bounding_points.append(u_normal)
+        lower_bounding_points.append(l_normal)
+    within = False
+    opposite = False
+    for bounding_points in [upper_bounding_points, lower_bounding_points]:
+        b1, b2, b3 = bounding_points[0], bounding_points[1], bounding_points[2]
+        b12, b23, b31 = b2-b1, b3-b2, b1- b3
+        len_b12, len_b23, len_b31 = np.linalg.norm(b12), np.linalg.norm(b23), np.linalg.norm(b31)
+        bound_plane_normal = np.cross(b12, b23)
+        if np.dot(bound_plane_normal, b1) < 0:
+            bound_plane_normal *= -1
+        bound_plane_normal = 1/np.linalg.norm(bound_plane_normal)*bound_plane_normal
+        d = -np.dot(bound_plane_normal, b31)
+        if (np.dot(point, bound_plane_normal)) == 0:
+            factor = 0
+        else:
+            factor = np.dot(b1, bound_plane_normal)/(np.dot(point, bound_plane_normal)) #the intercept of the position vector of the point with the bound plane
+        p = factor * point 
+        if factor <= 0:
+            opposite = True
+        elif factor > 0:
+            if np.sign(bound_plane_normal[2]) == np.sign(point[2]):
+                opposite = False
+            else:
+                opposite = True
+            
+            
+        ##plot for checking
+        if show == True:
+            ax.plot([b1[0],b2[0],b3[0], b1[0]], [b1[1],b2[1],b3[1], b1[1]], [b1[2],b2[2],b3[2], b1[2]], color = 'blue')
+            ax.plot([0,bound_plane_normal[0]], [0,bound_plane_normal[1]], [0,bound_plane_normal[2]], color = 'blue', ls = '--')
+            xsp,ysp,zsp = sphere(1,50)
+            ax.plot_surface(xsp,ysp,zsp, color='grey', alpha = 0.05)
+            ax.plot([point[0]], [point[1]], [point[2]], color= 'red', marker= 'x')
+            ax.plot([0,point[0]], [0,point[1]], [0,point[2]], color= 'red')
+            if opposite == False:
+                ax.plot([0,point[0],p[0]], [0,point[1],p[1]], [0,point[2],p[2]], color= 'red')
+                ax.plot([p[0]], [p[1]], [p[2]], color= 'red', marker= 'o')
+            show_equatorial_region(region_bounds, latt_a,latt_b,latt_c, ax)
+            lprojx,lprojy, linel= equatorial_projection([0,0,0,[point[0]],[point[1]],[point[2]]])
+            ax.scatter(lprojx, lprojy, color = 'grey', marker = 'o') 
+            head,tail = linel
+            ax.plot((head[0], tail[0]),(head[1], tail[1]),(head[2], tail[2]), ls = '--', color = 'grey')
 
+        #####end of plot
+        
+        rot_axis = np.array((0.5*bound_plane_normal[0], 0.5*bound_plane_normal[1], 0.5*bound_plane_normal[2]+0.5))
+        if np.linalg.norm(rot_axis) == 0:
+            rot_axis = np.array((0,0,1))
+        normalise = 1/np.linalg.norm(rot_axis)
+        rot_axis = normalise*rot_axis
+        b1 = rotate_180(rot_axis, b1)
+        b2 = rotate_180(rot_axis, b2)
+        b3 = rotate_180(rot_axis, b3)
+        p = rotate_180(rot_axis, p)
+        b12, b23, b31 = b2-b1, b3-b2, b1- b3
+
+        i12p = (b12[0]*p[1]- b12[1]*p[0])/(b1[1]*b12[0]-b1[0]*b12[1])- 1
+        i123 = (b12[0]*b3[1]- b12[1]*b3[0])/(b1[1]*b12[0]-b1[0]*b12[1])-1
+        i23p = (b23[0]*p[1]- b23[1]*p[0])/(b2[1]*b23[0]-b2[0]*b23[1]) - 1
+        i231 = (b23[0]*b1[1]- b23[1]*b1[0])/(b2[1]*b23[0]-b2[0]*b23[1]) - 1
+        i31p = (b31[0]*p[1]- b31[1]*p[0])/(b3[1]*b31[0]-b3[0]*b31[1]) - 1
+        i312 = (b31[0]*b2[1]- b31[1]*b2[0])/(b3[1]*b31[0]-b3[0]*b31[1]) - 1
+
+        if i12p*i123 >= 0:
+            if i23p*i231 >= 0:
+                if i31p*i312 >= 0:
+                    if opposite == False:
+                        within = True
+    return within
+
+def show_equatorial_region(region_bounds, latt_a,latt_b,latt_c, ax):
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from mpl_toolkits.mplot3d import Axes3D
+    sphere_intercepts = []
+    for hkl in region_bounds:
+        plane = plane_vector(hkl, latt_a,latt_b,latt_c)
+        projx,projy, line= equatorial_projection(plane)
+        ax.scatter(projx,projy, marker = 'o', color = 'black')
+        x,y,z,u,v,w = plane
+        sphere_intercepts.append(np.asarray((u[0],v[0],w[0])))
+    for i in range(len(sphere_intercepts)):
+        p1 = np.asarray(sphere_intercepts[i])
+        for j in range(len(sphere_intercepts)):
+            p2 = np.asarray(sphere_intercepts[j])
+            xx,yy,zz = shortest_path(p1,p2, hemisphere_correct = False)
+            xu, yu = equatorial_trace_projection([xx,yy,zz])
+            ax.plot(xu,yu, color='grey')
+
+def stereograph_sample_region(lattice_vectors, region_bounds, ranges = range(-3,3), threshold_hkl = 10, threshold_d = 0, factor = 1e-6):
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from mpl_toolkits.mplot3d import Axes3D
+    fig = plt.figure(constrained_layout=False)
+    gs = fig.add_gridspec(nrows=2, ncols=2,wspace=0.2)
+    ax2 = fig.add_subplot(gs[:, :])
+
+
+    latt_a, latt_b, latt_c = lattice_vectors
+    latt_a, latt_b, latt_c =latt_a*factor, latt_b*factor, latt_c*factor
+    
+    x,y,z = plane_sphere_intercept((0,0,0), latt_a, latt_b, latt_c)
+    ax2.plot(x,y, color='black', lw = 1)
+    
+    sphere_intercepts = []
+    
+    for hkl in region_bounds:
+        plane = plane_vector(hkl, latt_a,latt_b,latt_c)
+        projx,projy, line= equatorial_projection(plane)
+        ax2.scatter(projx,projy, marker = 'o', color = 'black')
+        projx,projy = np.round(projx, 2), np.round(projy, 2)
+        x,y,z,u,v,w = plane
+        sphere_intercepts.append(np.asarray((u[0],v[0],w[0])))
+    for i in range(len(sphere_intercepts)):
+        p1 = np.asarray(sphere_intercepts[i])
+        for j in range(len(sphere_intercepts)):
+            p2 = np.asarray(sphere_intercepts[j])
+            xx,yy,zz = shortest_path(p1,p2, hemisphere_correct = False)
+            xu, yu = equatorial_trace_projection([xx,yy,zz])
+            ax2.plot(xu,yu, color='red')
+    count =0 
+    for h in ranges:
+        for k in ranges:
+            for l in ranges:
+                if np.sqrt(h**2 + k**2 + l**2) < threshold_hkl:
+                    hkl = [h,k,l]
+                    x,y,z,u,v,w  = plane_vector(hkl, latt_a,latt_b,latt_c)
+                    vector = np.array((u[0],v[0],w[0]))
+                    within = within_bound_region(lattice_vectors, region_bounds, vector)
+                    if within == True:
+                        vector = np.array((0,0,0,u,v,w))
+                        projx,projy, line= equatorial_projection(vector)
+                        ax2.scatter(projx,projy, marker = 'o', color = 'black')
+                        print('Within Region: ', h,k,l,', Threshold Factor: ', np.sqrt(h**2 + k**2 + l**2))
+                        count += 1
+    print('Total: ', count)
+
+
+    plt.show()
+    
+def rotate_180(rot_axis, point):
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from mpl_toolkits.mplot3d import Axes3D
+    u,v,w = rot_axis[0], rot_axis[1], rot_axis[2]
+    x,y,z = point[0], point[1], point[2]
+    nx, ny, nz = (2*u*(u*x + v*y + w*z)-x), (2*v*(u*x + v*y + w*z)- y),(2*w*(u*x + v*y + w*z)- z)
+    return np.array((nx, ny, nz))
+
+def test_plane(hkl, lattice_vectors, factor = 1e-6):
+    import numpy as np
+    latt_a, latt_b, latt_c = lattice_vectors
+    latt_a, latt_b, latt_c =latt_a*factor, latt_b*factor, latt_c*factor
+    x,y,z,u,v,w  = plane_vector(hkl, latt_a,latt_b,latt_c)
+    vector = np.array((u[0],v[0],w[0]))
+    return vector
     
